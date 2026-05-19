@@ -111,22 +111,49 @@ func handleReplication(c *gin.Context) {
 			balance := req.Data["balance"].(float64)
 			city := req.Data["city"].(string)
 
-			_, err := database.DB.Exec("INSERT INTO clients (id, name, balance, city) VALUES (?, ?, ?, ?)", id, name, balance, city)
+			// UPSERT: if the record already exists (e.g. inserted by temp master),
+			// update it instead of failing with a duplicate-key error.
+			_, err := database.DB.Exec(
+				"INSERT INTO clients (id, name, balance, city) VALUES (?, ?, ?, ?) "+
+					"ON DUPLICATE KEY UPDATE name=VALUES(name), balance=VALUES(balance), city=VALUES(city)",
+				id, name, balance, city)
 			if err != nil {
+				log.Printf("[REPLICATION] Failed to upsert client ID=%d: %v", id, err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
+			log.Printf("[REPLICATION] Upserted client ID=%d via insert action", id)
+
 		case "update":
 			id := int(req.Data["id"].(float64))
 			name := req.Data["name"].(string)
 			balance := req.Data["balance"].(float64)
 			city := req.Data["city"].(string)
 
-			_, err := database.DB.Exec("UPDATE clients SET name=?, balance=?, city=? WHERE id=?", name, balance, city, id)
+			// Try UPDATE first; if no rows matched the record doesn't exist yet
+			// (e.g. it was inserted on master after a failback sync), so INSERT it.
+			res, err := database.DB.Exec("UPDATE clients SET name=?, balance=?, city=? WHERE id=?", name, balance, city, id)
 			if err != nil {
+				log.Printf("[REPLICATION] Failed to update client ID=%d: %v", id, err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
+			rowsAffected, _ := res.RowsAffected()
+			if rowsAffected == 0 {
+				// Record not found — insert it so this slave catches up
+				_, err = database.DB.Exec(
+					"INSERT INTO clients (id, name, balance, city) VALUES (?, ?, ?, ?)",
+					id, name, balance, city)
+				if err != nil {
+					log.Printf("[REPLICATION] Failed to insert missing client ID=%d during update replication: %v", id, err)
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+				log.Printf("[REPLICATION] Client ID=%d not found during update — inserted instead", id)
+			} else {
+				log.Printf("[REPLICATION] Updated client ID=%d", id)
+			}
+
 		case "delete":
 			id := int(req.Data["id"].(float64))
 
@@ -135,6 +162,7 @@ func handleReplication(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
+			log.Printf("[REPLICATION] Deleted client ID=%d", id)
 		}
 	}
 

@@ -408,17 +408,21 @@ func syncFromSlave(c *gin.Context) {
 	}
 	reqMu.Unlock()
 
-	// 3. Replicate the full updated DB to all active slaves for uniformity
+	// 3. Replicate the full updated DB to all active slaves for uniformity.
+	// Use "insert" action so the slave's upsert logic handles both new records
+	// (never seen by the slave) and existing records (needs updating).
 	go func() {
+		// Small delay to ensure slaves have registered at least one heartbeat
+		time.Sleep(2 * time.Second)
 		allClients, err := database.GetAllClients()
 		if err != nil {
 			log.Printf("[SYNC] Failed to fetch clients for post-sync replication: %v", err)
 			return
 		}
 		for _, client := range allClients {
-			replication.ReplicateToSlaves("update", "clients", client)
+			replication.ReplicateToSlaves("insert", "clients", client)
 		}
-		log.Printf("[SYNC] Post-sync replication sent to all active slaves")
+		log.Printf("[SYNC] Post-sync replication complete: pushed %d records to all active slaves", len(allClients))
 	}()
 
 	// 4. Mark sync as complete
