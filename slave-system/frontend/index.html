@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slave Node - Distributed Bank</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="logo">BankSlave</div>
+        <div class="nav-status">
+            <span class="indicator active" id="master-indicator"></span>
+            Master Connection
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Dashboard Header -->
+        <div class="header">
+            <h1>Slave Data Node</h1>
+            <p>Read-only replica. Write requests are automatically forwarded to the Master.</p>
+        </div>
+
+        <!-- Node Status Cards -->
+        <div class="grid cards">
+            <div class="card glass">
+                <h3>Slave Status</h3>
+                <div class="status-indicator">
+                    <div class="pulse-ring"></div>
+                    <span>Running</span>
+                </div>
+                <p class="stat">Port: 8081</p>
+            </div>
+            <div class="card glass">
+                <h3>Master Status</h3>
+                <div class="status-indicator" id="master-status-text">
+                    <div class="pulse-ring" id="master-pulse"></div>
+                    <span id="master-text">Online</span>
+                </div>
+            </div>
+            <div class="card glass">
+                <h3>Total Clients</h3>
+                <div class="stat-number" id="client-count">0</div>
+            </div>
+        </div>
+
+        <div class="grid main-content">
+            <!-- Left Column: Operations -->
+            <div class="col left">
+                <!-- Database Operations (Forwarded) -->
+                <div class="card glass form-card">
+                    <h3>Forwarded Operations</h3>
+                    <p style="font-size: 0.9rem; margin-bottom: 1rem; color: #666;">These operations will be sent to the Master node and replicated back to this Slave.</p>
+                    <div class="tabs">
+                        <button class="tab active" onclick="switchTab('insert')">Insert</button>
+                        <button class="tab" onclick="switchTab('update')">Update</button>
+                        <button class="tab" onclick="switchTab('delete')">Delete</button>
+                    </div>
+
+                    <div id="tab-insert" class="tab-content active">
+                        <input type="text" id="ins-name" placeholder="Client Name">
+                        <input type="number" id="ins-balance" placeholder="Balance">
+                        <input type="text" id="ins-city" placeholder="City">
+                        <button onclick="insertClient()">Insert & Forward</button>
+                    </div>
+
+                    <div id="tab-update" class="tab-content">
+                        <input type="number" id="upd-id" placeholder="Client ID">
+                        <input type="text" id="upd-name" placeholder="New Name">
+                        <input type="number" id="upd-balance" placeholder="New Balance">
+                        <input type="text" id="upd-city" placeholder="New City">
+                        <button onclick="updateClient()">Update & Forward</button>
+                    </div>
+
+                    <div id="tab-delete" class="tab-content">
+                        <input type="number" id="del-id" placeholder="Client ID">
+                        <button onclick="deleteClient()" class="btn-danger">Delete & Forward</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Data View -->
+            <div class="col right">
+                <div class="card glass table-card">
+                    <h3>Local Database Replica</h3>
+                    <div class="table-container">
+                        <table id="clients-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Balance</th>
+                                    <th>City</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Dynamic -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Replication Logs -->
+                <div class="card glass log-card">
+                    <h3>Replication & Heartbeat Logs</h3>
+                    <div id="logs" class="logs-container">
+                        <!-- Dynamic Logs -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

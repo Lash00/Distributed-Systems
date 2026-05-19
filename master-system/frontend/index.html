@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Master Node - Distributed Bank</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="logo">BankMaster</div>
+        <div class="nav-status">
+            <span class="indicator active"></span>
+            Master Node Online
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Dashboard Header -->
+        <div class="header">
+            <h1>Master Control Center</h1>
+            <p>Manage the distributed database, monitor slaves, and perform transactions.</p>
+        </div>
+
+        <!-- Node Status Cards -->
+        <div class="grid cards">
+            <div class="card glass">
+                <h3>Master Status</h3>
+                <div class="status-indicator">
+                    <div class="pulse-ring"></div>
+                    <span>Running</span>
+                </div>
+                <p class="stat">Port: 8080</p>
+            </div>
+            <div class="card glass">
+                <h3>Connected Slaves</h3>
+                <div class="stat-number" id="slave-count">0</div>
+                <ul id="slave-list" class="slave-list">
+                    <!-- Dynamic -->
+                </ul>
+            </div>
+            <div class="card glass">
+                <h3>Total Clients</h3>
+                <div class="stat-number" id="client-count">0</div>
+            </div>
+        </div>
+
+        <div class="grid main-content">
+            <!-- Left Column: Operations -->
+            <div class="col left">
+                <!-- Text to Query -->
+                <div class="card glass nlp-card">
+                    <h3>Smart Query</h3>
+                    <p>Use natural language to execute queries (e.g. "delete client 5").</p>
+                    <div class="input-group">
+                        <input type="text" id="nlp-input" placeholder="Type your query...">
+                        <button onclick="executeNLP()">Execute</button>
+                    </div>
+                    <div id="nlp-result" class="result-msg"></div>
+                </div>
+
+                <!-- Database Operations -->
+                <div class="card glass form-card">
+                    <h3>Database Operations</h3>
+                    <div class="tabs">
+                        <button class="tab active" onclick="switchTab('insert')">Insert</button>
+                        <button class="tab" onclick="switchTab('update')">Update</button>
+                        <button class="tab" onclick="switchTab('delete')">Delete</button>
+                    </div>
+
+                    <div id="tab-insert" class="tab-content active">
+                        <input type="text" id="ins-name" placeholder="Client Name">
+                        <input type="number" id="ins-balance" placeholder="Balance">
+                        <input type="text" id="ins-city" placeholder="City">
+                        <button onclick="insertClient()">Insert Client</button>
+                    </div>
+
+                    <div id="tab-update" class="tab-content">
+                        <input type="number" id="upd-id" placeholder="Client ID">
+                        <input type="text" id="upd-name" placeholder="New Name">
+                        <input type="number" id="upd-balance" placeholder="New Balance">
+                        <input type="text" id="upd-city" placeholder="New City">
+                        <button onclick="updateClient()">Update Client</button>
+                    </div>
+
+                    <div id="tab-delete" class="tab-content">
+                        <input type="number" id="del-id" placeholder="Client ID">
+                        <button onclick="deleteClient()" class="btn-danger">Delete Client</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Data View -->
+            <div class="col right">
+                <div class="card glass table-card">
+                    <h3>Clients Database</h3>
+                    <div class="table-container">
+                        <table id="clients-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Balance</th>
+                                    <th>City</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Dynamic -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Replication Logs -->
+                <div class="card glass log-card">
+                    <h3>System Logs</h3>
+                    <div id="logs" class="logs-container">
+                        <!-- Dynamic Logs -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
