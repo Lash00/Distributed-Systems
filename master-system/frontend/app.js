@@ -67,7 +67,10 @@ async function fetchStatus() {
 
 async function insertClient() {
     const name = document.getElementById('ins-name').value;
-    const balance = parseFloat(document.getElementById('ins-balance').value);
+    let balanceVal = document.getElementById('ins-balance').value;
+    // Clean currency symbols, commas, and whitespace
+    balanceVal = balanceVal.replace(/[\$,\s]/g, '');
+    const balance = parseFloat(balanceVal) || 0;
     const city = document.getElementById('ins-city').value;
     
     try {
@@ -85,7 +88,10 @@ async function insertClient() {
 async function updateClient() {
     const id = parseInt(document.getElementById('upd-id').value);
     const name = document.getElementById('upd-name').value;
-    const balance = parseFloat(document.getElementById('upd-balance').value);
+    let balanceVal = document.getElementById('upd-balance').value;
+    // Clean currency symbols, commas, and whitespace
+    balanceVal = balanceVal.replace(/[\$,\s]/g, '');
+    const balance = parseFloat(balanceVal) || 0;
     const city = document.getElementById('upd-city').value;
     
     try {

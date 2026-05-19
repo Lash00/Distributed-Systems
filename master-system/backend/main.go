@@ -68,9 +68,12 @@ func getClients(c *gin.Context) {
 func insertClient(c *gin.Context) {
 	var req database.Client
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		log.Printf("[ERROR] Failed to bind JSON for insert: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
 		return
 	}
+	
+	log.Printf("[INFO] Received INSERT request: Name='%s', Balance=%0.2f, City='%s'", req.Name, req.Balance, req.City)
 
 	// Insert into local DB
 	res, err := database.DB.Exec("INSERT INTO clients (name, balance, city) VALUES (?, ?, ?)", req.Name, req.Balance, req.City)
@@ -91,9 +94,12 @@ func insertClient(c *gin.Context) {
 func updateClient(c *gin.Context) {
 	var req database.Client
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		log.Printf("[ERROR] Failed to bind JSON for update: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
 		return
 	}
+	
+	log.Printf("[INFO] Received UPDATE request: ID=%d, Name='%s', Balance=%0.2f, City='%s'", req.ID, req.Name, req.Balance, req.City)
 
 	// Update local DB
 	_, err := database.DB.Exec("UPDATE clients SET name=?, balance=?, city=? WHERE id=?", req.Name, req.Balance, req.City, req.ID)
@@ -140,8 +146,28 @@ func receiveHeartbeat(c *gin.Context) {
 		return
 	}
 	
+	// Get the port of the slave
+	parts := strings.Split(req.Address, ":")
+	port := "8081"
+	if len(parts) > 1 {
+		port = parts[len(parts)-1]
+	}
+
+	// Resolve the real client IP (caller IP)
+	clientIP := c.ClientIP()
+	
+	// If the slave sent a loopback/local address, substitute it with their actual network IP
+	var realAddress string
+	if strings.HasPrefix(req.Address, "127.0.0.1") || strings.HasPrefix(req.Address, "localhost") || strings.HasPrefix(req.Address, "0.0.0.0") || strings.HasPrefix(req.Address, "::1") {
+		realAddress = fmt.Sprintf("%s:%s", clientIP, port)
+	} else {
+		realAddress = req.Address
+	}
+	
+	log.Printf("Heartbeat received from %s (registered as %s)", req.Address, realAddress)
+	
 	// Register the slave's heartbeat
-	heartbeat.RegisterSlave(req.Address)
+	heartbeat.RegisterSlave(realAddress)
 	c.JSON(http.StatusOK, gin.H{"message": "Heartbeat acknowledged"})
 }
 
