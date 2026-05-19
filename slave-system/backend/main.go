@@ -152,23 +152,21 @@ func forwardRequest(c *gin.Context) {
 
 	// If the original Master is down, find the promoted Slave Master!
 	if heartbeat.IsMasterDown {
-		otherSlavePort := "8082"
-		if config.AppConfig.Port == "8082" {
-			otherSlavePort = "8081"
-		}
-		
-		client := &http.Client{Timeout: 2 * time.Second}
-		otherStatusURL := fmt.Sprintf("http://127.0.0.1:%s/status", otherSlavePort)
-		statusResp, err := client.Get(otherStatusURL)
-		if err == nil {
-			defer statusResp.Body.Close()
-			var status struct {
-				Role string `json:"role"`
-			}
-			if err := json.NewDecoder(statusResp.Body).Decode(&status); err == nil && status.Role == "master" {
-				// Route to the promoted Slave Master!
-				masterURL = fmt.Sprintf("http://127.0.0.1:%s%s", otherSlavePort, c.Request.URL.Path)
-				log.Printf("[FAILOVER ROUTE] Original Master is down. Routing proposal to promoted Slave Master at %s", masterURL)
+		client := &http.Client{Timeout: 1 * time.Second}
+		for _, node := range config.AppConfig.SlaveNodes {
+			// Query each configured sibling
+			statusURL := fmt.Sprintf("http://%s/status", node)
+			statusResp, err := client.Get(statusURL)
+			if err == nil {
+				defer statusResp.Body.Close()
+				var status struct {
+					Role string `json:"role"`
+				}
+				if err := json.NewDecoder(statusResp.Body).Decode(&status); err == nil && status.Role == "master" {
+					masterURL = fmt.Sprintf("http://%s%s", node, c.Request.URL.Path)
+					log.Printf("[FAILOVER ROUTE] Original Master is down. Routing proposal to promoted Slave Master at %s", masterURL)
+					break
+				}
 			}
 		}
 	}
