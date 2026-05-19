@@ -1,11 +1,11 @@
 {
   "role": "slave",
-  "ip": "127.0.0.1",
+  "ip": "0.0.0.0",
   "port": "8081",
-  "master_ip": "127.0.0.1",
+  "master_ip": "10.125.185.177",
   "master_port": "8080",
   "db_user": "root",
-  "db_pass": "lash",
+  "db_pass": "123456789",
   "db_host": "127.0.0.1",
   "db_port": "3306",
   "db_name": "slave_bank_1"
