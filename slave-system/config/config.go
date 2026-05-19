@@ -8,16 +8,17 @@ import (
 
 // Config holds the application configuration
 type Config struct {
-	Role       string `json:"role"`
-	IP         string `json:"ip"`
-	Port       string `json:"port"`
-	MasterIP   string `json:"master_ip"`
-	MasterPort string `json:"master_port"`
-	DBUser     string `json:"db_user"`
-	DBPass     string `json:"db_pass"`
-	DBHost     string `json:"db_host"`
-	DBPort     string `json:"db_port"`
-	DBName     string `json:"db_name"`
+	Role       string   `json:"role"`
+	IP         string   `json:"ip"`
+	Port       string   `json:"port"`
+	MasterIP   string   `json:"master_ip"`
+	MasterPort string   `json:"master_port"`
+	DBUser     string   `json:"db_user"`
+	DBPass     string   `json:"db_pass"`
+	DBHost     string   `json:"db_host"`
+	DBPort     string   `json:"db_port"`
+	DBName     string   `json:"db_name"`
+	SlaveNodes []string `json:"slave_nodes"`
 }
 
 var AppConfig *Config

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"slave-system/config"
 	"slave-system/database"
@@ -221,6 +222,12 @@ func handleLocalWrite(c *gin.Context) {
 		balance := req.Data["balance"].(float64)
 		city := req.Data["city"].(string)
 
+		if err := ValidateClientData(name, balance, city); err != nil {
+			log.Printf("[ERROR] Local insert validation failed: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		res, err := database.DB.Exec("INSERT INTO clients (name, balance, city) VALUES (?, ?, ?)", name, balance, city)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to execute local insert: " + err.Error()})
@@ -248,6 +255,12 @@ func handleLocalWrite(c *gin.Context) {
 		name := req.Data["name"].(string)
 		balance := req.Data["balance"].(float64)
 		city := req.Data["city"].(string)
+
+		if err := ValidateClientData(name, balance, city); err != nil {
+			log.Printf("[ERROR] Local update validation failed: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
 		res, err := database.DB.Exec("UPDATE clients SET name=?, balance=?, city=? WHERE id=?", name, balance, city, id)
 		if err != nil {
@@ -512,6 +525,26 @@ func handleSubmitRequest(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload: " + err.Error()})
 		return
+	}
+
+	// Validate data contents if inserting/updating
+	if req.Type == "insert" || req.Type == "update" {
+		name, _ := req.Data["name"].(string)
+		var balance float64
+		if bVal, ok := req.Data["balance"]; ok {
+			switch v := bVal.(type) {
+			case float64:
+				balance = v
+			case int:
+				balance = float64(v)
+			}
+		}
+		city, _ := req.Data["city"].(string)
+		if err := ValidateClientData(name, balance, city); err != nil {
+			log.Printf("[ERROR] Proposal validation failed: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed: " + err.Error()})
+			return
+		}
 	}
 
 	// Validate client ID existence for update/smart_query
@@ -799,4 +832,18 @@ func approveChangeRequest(c *gin.Context) {
 	PendingRequests = append(PendingRequests[:targetIndex], PendingRequests[targetIndex+1:]...)
 	log.Printf("[INFO] Temporary Master approved and executed change request: %s", body.ID)
 	c.JSON(http.StatusOK, gin.H{"message": "Request approved and executed successfully"})
+}
+
+// ValidateClientData checks business rules before writing to database
+func ValidateClientData(name string, balance float64, city string) error {
+	if balance < 0 {
+		return fmt.Errorf("balance cannot be negative ($%0.2f)", balance)
+	}
+
+	for _, r := range city {
+		if unicode.IsDigit(r) {
+			return fmt.Errorf("city name '%s' cannot contain numeric digits", city)
+		}
+	}
+	return nil
 }

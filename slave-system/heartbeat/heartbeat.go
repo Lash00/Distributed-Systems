@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"time"
 
 	"slave-system/config"
@@ -50,50 +51,47 @@ func sendHeartbeat() {
 			IsMasterDown = true
 			log.Println("Master is confirmed DOWN! Initiating failover master selection...")
 
-			// Master Selection: check the other slave to prevent split-brain
-			otherSlavePort := "8082"
-			if config.AppConfig.Port == "8082" {
-				otherSlavePort = "8081"
+			// Master Selection: check configured sibling slaves to prevent split-brain
+			myAddr := fmt.Sprintf("%s:%s", config.AppConfig.IP, config.AppConfig.Port)
+			if config.AppConfig.IP == "0.0.0.0" || config.AppConfig.IP == "" {
+				myAddr = fmt.Sprintf("127.0.0.1:%s", config.AppConfig.Port)
 			}
-			otherStatusURL := fmt.Sprintf("http://127.0.0.1:%s/status", otherSlavePort)
 
 			isOtherMaster := false
-			statusResp, err := client.Get(otherStatusURL)
-			if err == nil {
-				defer statusResp.Body.Close()
-				var status struct {
-					Role string `json:"role"`
+			activeSlaves := []string{myAddr} // We are active
+
+			for _, node := range config.AppConfig.SlaveNodes {
+				if node == myAddr || node == fmt.Sprintf("127.0.0.1:%s", config.AppConfig.Port) {
+					continue // Skip ourselves
 				}
-				if err := json.NewDecoder(statusResp.Body).Decode(&status); err == nil {
-					if status.Role == "master" {
-						isOtherMaster = true
+
+				statusURL := fmt.Sprintf("http://%s/status", node)
+				statusResp, err := client.Get(statusURL)
+				if err == nil {
+					defer statusResp.Body.Close()
+					var status struct {
+						Role string `json:"role"`
+					}
+					if err := json.NewDecoder(statusResp.Body).Decode(&status); err == nil {
+						activeSlaves = append(activeSlaves, node)
+						if status.Role == "master" {
+							isOtherMaster = true
+						}
 					}
 				}
 			}
 
 			if isOtherMaster {
-				log.Printf("Failover: Other Slave %s is already promoted to Master. We will remain a Slave.\n", otherSlavePort)
+				log.Println("Failover: Another Slave is already promoted to Master. We will remain a Slave.")
 			} else {
-				// Priority check: lower port number wins (8081 wins over 8082)
-				if config.AppConfig.Port == "8081" {
+				// Sort the active slave addresses lexicographically (alphabetically)
+				sort.Strings(activeSlaves)
+
+				// Sibling node with the lowest address gets promoted to Master!
+				if len(activeSlaves) > 0 && activeSlaves[0] == myAddr {
 					promoteToMaster()
 				} else {
-					// We are Slave 2 (8082). We wait a moment to let 8081 promote.
-					time.Sleep(2 * time.Second)
-					statusResp2, err2 := client.Get("http://127.0.0.1:8081/status")
-					if err2 == nil {
-						defer statusResp2.Body.Close()
-						var status struct {
-							Role string `json:"role"`
-						}
-						if err := json.NewDecoder(statusResp2.Body).Decode(&status); err == nil && status.Role == "master" {
-							log.Println("Failover: Slave 1 (8081) promoted successfully. We remain a Slave.")
-						} else {
-							promoteToMaster()
-						}
-					} else {
-						promoteToMaster()
-					}
+					log.Printf("Failover: Sibling Slave %s has higher priority. We remain a Slave.\n", activeSlaves[0])
 				}
 			}
 		}
