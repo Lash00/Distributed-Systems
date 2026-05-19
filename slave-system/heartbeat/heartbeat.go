@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"sort"
 	"time"
@@ -52,16 +53,17 @@ func sendHeartbeat() {
 			log.Println("Master is confirmed DOWN! Initiating failover master selection...")
 
 			// Master Selection: check configured sibling slaves to prevent split-brain
-			myAddr := fmt.Sprintf("%s:%s", config.AppConfig.IP, config.AppConfig.Port)
-			if config.AppConfig.IP == "0.0.0.0" || config.AppConfig.IP == "" {
-				myAddr = fmt.Sprintf("127.0.0.1:%s", config.AppConfig.Port)
+			ipAddress := config.AppConfig.IP
+			if ipAddress == "0.0.0.0" || ipAddress == "" {
+				ipAddress = GetOutboundIP()
 			}
+			myAddr := fmt.Sprintf("%s:%s", ipAddress, config.AppConfig.Port)
 
 			isOtherMaster := false
 			activeSlaves := []string{myAddr} // We are active
 
 			for _, node := range config.AppConfig.SlaveNodes {
-				if node == myAddr || node == fmt.Sprintf("127.0.0.1:%s", config.AppConfig.Port) {
+				if node == myAddr || node == fmt.Sprintf("127.0.0.1:%s", config.AppConfig.Port) || node == fmt.Sprintf("0.0.0.0:%s", config.AppConfig.Port) {
 					continue // Skip ourselves
 				}
 
@@ -111,4 +113,17 @@ func promoteToMaster() {
 	log.Println("FAILOVER: This Slave is now becoming the MASTER!")
 	log.Println("-------------------------------------------------")
 	config.AppConfig.Role = "master"
+}
+
+// GetOutboundIP dynamically determines the local IP address used to reach the Master
+func GetOutboundIP() string {
+	conn, err := net.Dial("udp", fmt.Sprintf("%s:%s", config.AppConfig.MasterIP, config.AppConfig.MasterPort))
+	if err != nil {
+		log.Printf("[WARNING] Could not resolve outbound IP, falling back to localhost: %v", err)
+		return "127.0.0.1"
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String()
 }
