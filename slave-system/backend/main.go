@@ -34,6 +34,21 @@ func main() {
 	// Start Heartbeat
 	heartbeat.StartHeartbeat()
 
+	// Register DB fetcher so heartbeat can pull clients on failback
+	heartbeat.DBFetcher = func() (interface{}, error) {
+		return database.GetAllClients()
+	}
+
+	// Register pending request fetcher so heartbeat can push the queue on failback
+	heartbeat.PendingFetcher = func() interface{} {
+		reqMu.Lock()
+		defer reqMu.Unlock()
+		// Return a copy to avoid race conditions
+		copied := make([]ChangeRequest, len(PendingRequests))
+		copy(copied, PendingRequests)
+		return copied
+	}
+
 	// Setup Gin Router
 	r := gin.Default()
 	r.Use(cors.Default())

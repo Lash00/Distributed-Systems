@@ -56,6 +56,9 @@ func main() {
 	r.POST("/approve-request", approveChangeRequest)
 	r.POST("/reject-request", rejectChangeRequest)
 
+	// 9. Failback Sync Endpoint — called by demoting temp-slave
+	r.POST("/sync-from-slave", syncFromSlave)
+
 	addr := fmt.Sprintf("%s:%s", config.AppConfig.IP, config.AppConfig.Port)
 	log.Printf("Master Node starting on %s...", addr)
 	if err := r.Run(addr); err != nil {
@@ -344,10 +347,86 @@ func handleTextToQuery(c *gin.Context) {
 
 func getStatus(c *gin.Context) {
 	activeSlaves := heartbeat.GetActiveSlaves()
+	syncMu.Lock()
+	sc := SyncComplete
+	syncMu.Unlock()
 	c.JSON(http.StatusOK, gin.H{
-		"role": "master",
+		"role":          "master",
 		"active_slaves": activeSlaves,
+		"sync_complete": sc,
 	})
+}
+
+// syncFromSlave is called by the demoting temp-slave on failback.
+// It receives the slave's full DB state + pending requests and merges them into master.
+func syncFromSlave(c *gin.Context) {
+	var body struct {
+		Clients         []database.Client `json:"clients"`
+		PendingRequests []ChangeRequest   `json:"pending_requests"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		log.Printf("[SYNC] Failed to bind sync payload: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid sync payload: " + err.Error()})
+		return
+	}
+
+	log.Printf("[SYNC] Received failback sync from slave: %d clients, %d pending requests", len(body.Clients), len(body.PendingRequests))
+
+	// 1. Upsert all clients from the slave into master DB
+	for _, client := range body.Clients {
+		// Try update first
+		res, err := database.DB.Exec(
+			"UPDATE clients SET name=?, balance=?, city=? WHERE id=?",
+			client.Name, client.Balance, client.City, client.ID,
+		)
+		if err != nil {
+			log.Printf("[SYNC] Error upserting client ID=%d: %v", client.ID, err)
+			continue
+		}
+		rowsAffected, _ := res.RowsAffected()
+		if rowsAffected == 0 {
+			// Row didn't exist, insert with explicit ID
+			_, err = database.DB.Exec(
+				"INSERT INTO clients (id, name, balance, city) VALUES (?, ?, ?, ?)",
+				client.ID, client.Name, client.Balance, client.City,
+			)
+			if err != nil {
+				log.Printf("[SYNC] Error inserting new client ID=%d: %v", client.ID, err)
+			}
+		}
+	}
+	log.Printf("[SYNC] Upserted %d clients from temp-slave into master DB", len(body.Clients))
+
+	// 2. Merge pending requests from the temp-slave into master's queue
+	reqMu.Lock()
+	for _, pr := range body.PendingRequests {
+		// Tag it so master GUI can show it as inherited
+		pr.ID = "INHERITED-" + pr.ID
+		pr.Status = "pending"
+		PendingRequests = append(PendingRequests, pr)
+		log.Printf("[SYNC] Inherited pending request: %s (type=%s)", pr.ID, pr.Type)
+	}
+	reqMu.Unlock()
+
+	// 3. Replicate the full updated DB to all active slaves for uniformity
+	go func() {
+		allClients, err := database.GetAllClients()
+		if err != nil {
+			log.Printf("[SYNC] Failed to fetch clients for post-sync replication: %v", err)
+			return
+		}
+		for _, client := range allClients {
+			replication.ReplicateToSlaves("update", "clients", client)
+		}
+		log.Printf("[SYNC] Post-sync replication sent to all active slaves")
+	}()
+
+	// 4. Mark sync as complete
+	syncMu.Lock()
+	SyncComplete = true
+	syncMu.Unlock()
+
+	c.JSON(http.StatusOK, gin.H{"message": "Sync received and applied successfully"})
 }
 
 // ChangeRequest represents an incoming write request from a slave or client
@@ -362,6 +441,10 @@ type ChangeRequest struct {
 
 var PendingRequests = []ChangeRequest{}
 var reqMu sync.Mutex
+
+// SyncComplete tracks whether the master has received a full sync from the temp-slave after failback
+var SyncComplete bool
+var syncMu sync.Mutex
 
 func submitChangeRequest(c *gin.Context) {
 	var req struct {

@@ -17,6 +17,13 @@
     </nav>
 
     <div class="container">
+
+        <!-- ⚡ Failback Sync Notification Banner -->
+        <div id="sync-banner" style="display:none; border-radius: 10px; padding: 12px 18px; margin-bottom: 1.2rem; font-size: 0.9rem; font-weight: 600; display: flex; align-items: center; gap: 12px; transition: all 0.4s ease;">
+            <span id="sync-banner-icon" style="font-size: 1.3rem;">⚠️</span>
+            <span id="sync-banner-text">Failback detected — waiting for slave sync...</span>
+        </div>
+
         <!-- Dashboard Header -->
         <div class="header">
             <h1>Master Control Center</h1>
@@ -95,6 +102,7 @@
                     <h3 style="color: var(--primary-med); margin-bottom: 0.5rem; border-bottom: 2px solid var(--primary-acc); padding-bottom: 0.5rem;">Pending Change Requests</h3>
                     <p style="font-size: 0.85rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 1rem;">
                         Review and approve/reject write proposals submitted by read-only client replicas.
+                        <span id="inherited-badge" style="display:none; background: #ff9800; color: #111; font-size: 0.75rem; font-weight:bold; padding: 2px 8px; border-radius: 4px; margin-left: 8px;">⚠️ INCLUDES INHERITED REQUESTS</span>
                     </p>
                     <div id="pending-requests-list" style="max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;">
                         <!-- Dynamic list of requests -->

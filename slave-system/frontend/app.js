@@ -111,7 +111,10 @@ async function fetchStatus() {
                 </ul>
             `;
         } else {
-            if(window.lastMasterState) addLog("SUCCESS: Master node is back online. Demoting self to SLAVE replica.");
+            if(window.lastMasterState) {
+                addLog("SUCCESS: Original Master is back online! Pushing failover data to master and demoting self to SLAVE replica...");
+                addLog("INFO: All data written during failover has been synced to the original master.");
+            }
             window.lastMasterState = false;
 
             // Hide Pending Requests Queue Card

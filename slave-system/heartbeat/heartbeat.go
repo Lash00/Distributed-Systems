@@ -16,6 +16,12 @@ import (
 var IsMasterDown bool
 var failCount int
 
+// DBFetcher is a callback set by the main package to fetch all current clients
+var DBFetcher func() (interface{}, error)
+
+// PendingFetcher is a callback set by the main package to fetch all pending requests
+var PendingFetcher func() interface{}
+
 // StartHeartbeat begins the heartbeat goroutine
 func StartHeartbeat() {
 	go func() {
@@ -35,11 +41,11 @@ func sendHeartbeat() {
 
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Post(masterURL, "application/json", bytes.NewBuffer(data))
-	
+
 	if err != nil || resp.StatusCode != http.StatusOK {
 		// Master is unreachable or returned error
 		if config.AppConfig.Role == "master" {
-			// We are already the temporary Master. Let's keep checking if the main master comes back.
+			// We are already the temporary Master. Keep checking if the main master comes back.
 			failCount++
 			return
 		}
@@ -113,11 +119,76 @@ func sendHeartbeat() {
 	} else {
 		resp.Body.Close()
 		failCount = 0
+		wasPromotedMaster := IsMasterDown && config.AppConfig.Role == "master"
+
 		if IsMasterDown || config.AppConfig.Role == "master" {
 			log.Println("Master is back online! Demoting self to SLAVE...")
+
+			// If we were the promoted temp-master, push our DB to the original master BEFORE demoting
+			if wasPromotedMaster {
+				log.Println("[FAILBACK] We were the Temp Master. Pushing sync data to original master now...")
+				go pushSyncToMaster()
+			}
+
 			config.AppConfig.Role = "slave"
 		}
 		IsMasterDown = false
+	}
+}
+
+// pushSyncToMaster collects the local DB and pending requests, then POSTs them to the master's /sync-from-slave
+func pushSyncToMaster() {
+	masterSyncURL := fmt.Sprintf("http://%s:%s/sync-from-slave", config.AppConfig.MasterIP, config.AppConfig.MasterPort)
+
+	// Collect clients using the registered fetcher
+	var clients interface{}
+	if DBFetcher != nil {
+		var err error
+		clients, err = DBFetcher()
+		if err != nil {
+			log.Printf("[FAILBACK] Failed to fetch local clients for sync: %v", err)
+			clients = []interface{}{}
+		}
+	} else {
+		log.Println("[FAILBACK] No DBFetcher registered — skipping client sync")
+		clients = []interface{}{}
+	}
+
+	// Collect pending requests using the registered fetcher
+	var pendingRequests interface{}
+	if PendingFetcher != nil {
+		pendingRequests = PendingFetcher()
+	} else {
+		log.Println("[FAILBACK] No PendingFetcher registered — skipping pending request sync")
+		pendingRequests = []interface{}{}
+	}
+
+	syncPayload := map[string]interface{}{
+		"clients":          clients,
+		"pending_requests": pendingRequests,
+	}
+
+	payloadBytes, err := json.Marshal(syncPayload)
+	if err != nil {
+		log.Printf("[FAILBACK] Failed to marshal sync payload: %v", err)
+		return
+	}
+
+	// Give master a moment to fully start up before we send sync data
+	time.Sleep(1 * time.Second)
+
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Post(masterSyncURL, "application/json", bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		log.Printf("[FAILBACK] Failed to push sync to master at %s: %v", masterSyncURL, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		log.Println("[FAILBACK] ✅ Successfully pushed failback sync data to original master!")
+	} else {
+		log.Printf("[FAILBACK] ⚠️ Master returned non-OK status for sync: %d", resp.StatusCode)
 	}
 }
 
