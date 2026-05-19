@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"master-system/config"
 	"master-system/database"
@@ -81,6 +82,12 @@ func insertClient(c *gin.Context) {
 		return
 	}
 	
+	if err := ValidateClientData(req.Name, req.Balance, req.City); err != nil {
+		log.Printf("[ERROR] Validation failed for insert: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	
 	log.Printf("[INFO] Received INSERT request: Name='%s', Balance=%0.2f, City='%s'", req.Name, req.Balance, req.City)
 
 	// Insert into local DB
@@ -104,6 +111,12 @@ func updateClient(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.Printf("[ERROR] Failed to bind JSON for update: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		return
+	}
+	
+	if err := ValidateClientData(req.Name, req.Balance, req.City); err != nil {
+		log.Printf("[ERROR] Validation failed for update: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	
@@ -359,6 +372,26 @@ func submitChangeRequest(c *gin.Context) {
 		log.Printf("[ERROR] Failed to bind JSON for submit request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
+	}
+
+	// Validate data contents if inserting/updating
+	if req.Type == "insert" || req.Type == "update" {
+		name, _ := req.Data["name"].(string)
+		var balance float64
+		if bVal, ok := req.Data["balance"]; ok {
+			switch v := bVal.(type) {
+			case float64:
+				balance = v
+			case int:
+				balance = float64(v)
+			}
+		}
+		city, _ := req.Data["city"].(string)
+		if err := ValidateClientData(name, balance, city); err != nil {
+			log.Printf("[ERROR] Proposal validation failed: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed: " + err.Error()})
+			return
+		}
 	}
 
 	// Validate client ID existence for update/delete/withdraw/deposit
@@ -712,5 +745,19 @@ func parseDepositQuery(text string) (float64, int, error) {
 	}
 
 	return amount, id, nil
+}
+
+// ValidateClientData checks business rules before writing to database
+func ValidateClientData(name string, balance float64, city string) error {
+	if balance < 0 {
+		return fmt.Errorf("balance cannot be negative ($%0.2f)", balance)
+	}
+
+	for _, r := range city {
+		if unicode.IsDigit(r) {
+			return fmt.Errorf("city name '%s' cannot contain numeric digits", city)
+		}
+	}
+	return nil
 }
 
