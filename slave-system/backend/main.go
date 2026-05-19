@@ -525,6 +525,25 @@ func handleSubmitRequest(c *gin.Context) {
 		return
 	}
 
+	// Check if this request is from the temp master himself
+	clientIP := c.ClientIP()
+	myIP := config.AppConfig.IP
+	if myIP == "0.0.0.0" || myIP == "" {
+		myIP = heartbeat.GetOutboundIP()
+	}
+	isFromSelf := clientIP == "127.0.0.1" || clientIP == "::1" || clientIP == myIP || clientIP == "localhost"
+
+	// If we are master and it is from ourselves, process DIRECTLY (no queueing!)
+	if config.AppConfig.Role == "master" && isFromSelf {
+		log.Printf("[FAILOVER] Temp Master received own write proposal. Redirecting to Direct Execution.")
+		
+		bodyBytes, _ := json.Marshal(req)
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+		
+		handleLocalWrite(c)
+		return
+	}
+
 	// Validate data contents if inserting/updating
 	if req.Type == "insert" || req.Type == "update" {
 		name, _ := req.Data["name"].(string)
