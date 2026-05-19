@@ -471,8 +471,15 @@ func parseDeleteQuery(text string) (int, error) {
 }
 
 func replicateToOtherSlaves(action string, table string, data interface{}) {
-	allSlaves := []string{"127.0.0.1:8081", "127.0.0.1:8082"}
+	allSlaves := config.AppConfig.SlaveNodes
+	if len(allSlaves) == 0 {
+		allSlaves = []string{"127.0.0.1:8081", "127.0.0.1:8082"}
+	}
+
 	myAddr := fmt.Sprintf("%s:%s", config.AppConfig.IP, config.AppConfig.Port)
+	if config.AppConfig.IP == "0.0.0.0" || config.AppConfig.IP == "" {
+		myAddr = fmt.Sprintf("%s:%s", heartbeat.GetOutboundIP(), config.AppConfig.Port)
+	}
 
 	type ReplicateData struct {
 		Action string      `json:"action"`
@@ -493,7 +500,7 @@ func replicateToOtherSlaves(action string, table string, data interface{}) {
 	}
 
 	for _, slaveAddr := range allSlaves {
-		if slaveAddr == myAddr {
+		if slaveAddr == myAddr || slaveAddr == fmt.Sprintf("127.0.0.1:%s", config.AppConfig.Port) || slaveAddr == fmt.Sprintf("0.0.0.0:%s", config.AppConfig.Port) {
 			continue // Skip ourselves!
 		}
 
