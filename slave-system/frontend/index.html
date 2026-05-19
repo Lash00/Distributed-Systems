@@ -47,36 +47,21 @@
         </div>
 
         <div class="grid main-content">
-            <!-- Left Column: Operations -->
+            <!-- Left Column: Read-Only Replica Info -->
             <div class="col left">
-                <!-- Database Operations (Forwarded) -->
-                <div class="card glass form-card">
-                    <h3>Forwarded Operations</h3>
-                    <p style="font-size: 0.9rem; margin-bottom: 1rem; color: #666;">These operations will be sent to the Master node and replicated back to this Slave.</p>
-                    <div class="tabs">
-                        <button class="tab active" onclick="switchTab('insert')">Insert</button>
-                        <button class="tab" onclick="switchTab('update')">Update</button>
-                        <button class="tab" onclick="switchTab('delete')">Delete</button>
-                    </div>
-
-                    <div id="tab-insert" class="tab-content active">
-                        <input type="text" id="ins-name" placeholder="Client Name">
-                        <input type="number" id="ins-balance" placeholder="Balance">
-                        <input type="text" id="ins-city" placeholder="City">
-                        <button onclick="insertClient()">Insert & Forward</button>
-                    </div>
-
-                    <div id="tab-update" class="tab-content">
-                        <input type="number" id="upd-id" placeholder="Client ID">
-                        <input type="text" id="upd-name" placeholder="New Name">
-                        <input type="number" id="upd-balance" placeholder="New Balance">
-                        <input type="text" id="upd-city" placeholder="New City">
-                        <button onclick="updateClient()">Update & Forward</button>
-                    </div>
-
-                    <div id="tab-delete" class="tab-content">
-                        <input type="number" id="del-id" placeholder="Client ID">
-                        <button onclick="deleteClient()" class="btn-danger">Delete & Forward</button>
+                <div class="card glass info-card" style="padding: 2.5rem 1.5rem; text-align: center;">
+                    <div class="lock-icon" style="font-size: 3.5rem; margin-bottom: 1rem; color: #ff9800; filter: drop-shadow(0 0 8px rgba(255, 152, 0, 0.4));">🔒</div>
+                    <h3 style="color: #ff9800; margin-bottom: 0.5rem; font-weight: 800; letter-spacing: 1px;">READ-ONLY REPLICA</h3>
+                    <p style="font-size: 0.95rem; line-height: 1.5; color: rgba(255, 255, 255, 0.7); margin-bottom: 1.5rem;">
+                        This node is a designated database replica. Direct write operations (Insert, Update, Delete) are disabled here to guarantee strict consistency across the cluster.
+                    </p>
+                    <div style="border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 1.2rem; text-align: left; font-size: 0.85rem; color: rgba(255, 255, 255, 0.5);">
+                        <strong style="color: #ff9800; display: block; margin-bottom: 0.5rem;">Replication Policies:</strong>
+                        <ul style="margin: 0; padding-left: 1.2rem; list-style-type: square; line-height: 1.6;">
+                            <li>All write transactions must run on the Master Node.</li>
+                            <li>Updates replicate downstream to this node in real-time.</li>
+                            <li>Supports local high-performance read queries.</li>
+                        </ul>
                     </div>
                 </div>
             </div>
