@@ -81,7 +81,14 @@ async function insertClient() {
         });
         const data = await res.json();
         addLog(`INSERT: ${name} (Res: ${data.message || data.error})`);
-        fetchClients();
+        if (res.status === 200) {
+            document.getElementById('ins-name').value = '';
+            document.getElementById('ins-balance').value = '';
+            document.getElementById('ins-city').value = '';
+            fetchClients();
+        } else {
+            alert(`⚠️ Insertion Error: ${data.error}`);
+        }
     } catch(e) { console.error(e); }
 }
 
@@ -102,7 +109,15 @@ async function updateClient() {
         });
         const data = await res.json();
         addLog(`UPDATE: Client ${id} (Res: ${data.message || data.error})`);
-        fetchClients();
+        if (res.status === 200) {
+            document.getElementById('upd-id').value = '';
+            document.getElementById('upd-name').value = '';
+            document.getElementById('upd-balance').value = '';
+            document.getElementById('upd-city').value = '';
+            fetchClients();
+        } else {
+            alert(`⚠️ Update Error: ${data.error}`);
+        }
     } catch(e) { console.error(e); }
 }
 
@@ -117,7 +132,12 @@ async function deleteClient() {
         });
         const data = await res.json();
         addLog(`DELETE: Client ${id} (Res: ${data.message || data.error})`);
-        fetchClients();
+        if (res.status === 200) {
+            document.getElementById('del-id').value = '';
+            fetchClients();
+        } else {
+            alert(`⚠️ Deletion Error: ${data.error}`);
+        }
     } catch(e) { console.error(e); }
 }
 
@@ -132,13 +152,106 @@ async function executeNLP() {
         const data = await res.json();
         document.getElementById('nlp-result').innerText = data.message || data.error;
         addLog(`QUERY: "${text}" -> ${data.message || data.error}`);
-        fetchClients();
+        if (res.status === 200) {
+            document.getElementById('nlp-input').value = '';
+            fetchClients();
+        } else {
+            alert(`⚠️ Query Error: ${data.error}`);
+        }
     } catch(e) { console.error(e); }
 }
 
 // Polling for real-time updates
 setInterval(fetchClients, 2000);
 setInterval(fetchStatus, 2000);
+setInterval(fetchPendingRequests, 2000);
 fetchClients();
 fetchStatus();
+fetchPendingRequests();
 addLog("System initialized. GUI connected to Master Node.");
+
+async function fetchPendingRequests() {
+    try {
+        const res = await fetch(`${API_URL}/pending-requests`);
+        const data = await res.json();
+        
+        const listDiv = document.getElementById('pending-requests-list');
+        listDiv.innerHTML = '';
+        
+        if (data && data.length > 0) {
+            data.forEach(req => {
+                let detailsHtml = '';
+                if (req.type === 'insert') {
+                    detailsHtml = `
+                        <div><strong>Type:</strong> <span style="color:#4ade80; font-weight:bold;">PROPOSE INSERT</span></div>
+                        <div><strong>Client:</strong> ${req.data.name}</div>
+                        <div><strong>Balance:</strong> $${req.data.balance}</div>
+                        <div><strong>City:</strong> ${req.data.city}</div>
+                    `;
+                } else if (req.type === 'smart_query') {
+                    detailsHtml = `
+                        <div><strong>Type:</strong> <span style="color:#38bdf8; font-weight:bold;">PROPOSE SMART QUERY</span></div>
+                        <div style="background: rgba(255,255,255,0.08); padding: 6px; border-radius: 4px; font-family: monospace; font-size: 0.85rem; border-left: 3px solid #38bdf8; color: #ffd54f; font-weight: bold; margin-top: 5px;">"${req.data.query}"</div>
+                    `;
+                } else {
+                    detailsHtml = `
+                        <div><strong>Type:</strong> <span style="color:#ff9800; font-weight:bold;">PROPOSE UPDATE</span></div>
+                        <div><strong>ID:</strong> ${req.data.id}</div>
+                        <div><strong>New Name:</strong> ${req.data.name}</div>
+                        <div><strong>New Balance:</strong> $${req.data.balance}</div>
+                        <div><strong>New City:</strong> ${req.data.city}</div>
+                    `;
+                }
+                
+                listDiv.innerHTML += `
+                    <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 10px; font-size: 0.85rem; display: flex; flex-direction: column; gap: 5px;">
+                        <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 3px; margin-bottom: 3px; font-weight: bold; color: var(--primary-acc);">
+                            <span>${req.id}</span>
+                            <span>From: ${req.origin_ip}</span>
+                        </div>
+                        ${detailsHtml}
+                        <div style="display: flex; gap: 8px; margin-top: 5px;">
+                            <button onclick="approveRequest('${req.id}')" style="background:#4ade80; color:#111; padding: 5px 8px; font-size: 0.8rem; margin-bottom: 0; width:auto; height:auto; line-height:1;">Accept ✅</button>
+                            <button onclick="rejectRequest('${req.id}')" style="background:#ef4444; color:white; padding: 5px 8px; font-size: 0.8rem; margin-bottom: 0; width:auto; height:auto; line-height:1;">Reject ❌</button>
+                        </div>
+                    </div>
+                `;
+            });
+        } else {
+            listDiv.innerHTML = `
+                <div style="color: #aaa; font-style: italic; font-size: 0.9rem; text-align: center; padding: 1rem;">
+                    No pending write requests.
+                </div>
+            `;
+        }
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+async function approveRequest(id) {
+    try {
+        const res = await fetch(`${API_URL}/approve-request`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id})
+        });
+        const data = await res.json();
+        addLog(`APPROVE: Request ${id} approved (Res: ${data.message || data.error})`);
+        fetchPendingRequests();
+        fetchClients();
+    } catch(e) { console.error(e); }
+}
+
+async function rejectRequest(id) {
+    try {
+        const res = await fetch(`${API_URL}/reject-request`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id})
+        });
+        const data = await res.json();
+        addLog(`REJECT: Request ${id} rejected (Res: ${data.message || data.error})`);
+        fetchPendingRequests();
+    } catch(e) { console.error(e); }
+}

@@ -52,16 +52,16 @@
                 <!-- Text to Query -->
                 <div class="card glass nlp-card">
                     <h3>Smart Query</h3>
-                    <p>Use natural language to execute queries (e.g. "delete client 5").</p>
+                    <p>Use natural language (e.g. "withdraw 500 from client 7", "deposit 300 to client 2").</p>
                     <div class="input-group">
-                        <input type="text" id="nlp-input" placeholder="Type your query...">
+                        <input type="text" id="nlp-input" placeholder="Type deposit, withdrawal, or delete query...">
                         <button onclick="executeNLP()">Execute</button>
                     </div>
                     <div id="nlp-result" class="result-msg"></div>
                 </div>
 
                 <!-- Database Operations -->
-                <div class="card glass form-card">
+                <div class="card glass form-card" style="margin-top: 10px;">
                     <h3>Database Operations</h3>
                     <div class="tabs">
                         <button class="tab active" onclick="switchTab('insert')">Insert</button>
@@ -89,6 +89,20 @@
                         <button onclick="deleteClient()" class="btn-danger">Delete Client</button>
                     </div>
                 </div>
+
+                <!-- Pending Change Requests Queue -->
+                <div class="card glass requests-card" style="margin-top: 1.5rem;">
+                    <h3 style="color: var(--primary-med); margin-bottom: 0.5rem; border-bottom: 2px solid var(--primary-acc); padding-bottom: 0.5rem;">Pending Change Requests</h3>
+                    <p style="font-size: 0.85rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 1rem;">
+                        Review and approve/reject write proposals submitted by read-only client replicas.
+                    </p>
+                    <div id="pending-requests-list" style="max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;">
+                        <!-- Dynamic list of requests -->
+                        <div style="color: #aaa; font-style: italic; font-size: 0.9rem; text-align: center; padding: 1rem;">
+                            No pending write requests.
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Right Column: Data View -->
@@ -113,7 +127,7 @@
                 </div>
 
                 <!-- Replication Logs -->
-                <div class="card glass log-card">
+                <div class="card glass log-card" style="margin-top: 10px;">
                     <h3>System Logs</h3>
                     <div id="logs" class="logs-container">
                         <!-- Dynamic Logs -->

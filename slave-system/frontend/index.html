@@ -47,15 +47,15 @@
         </div>
 
         <div class="grid main-content">
-            <!-- Left Column: Read-Only Replica Info -->
+            <!-- Left Column: Read-Only Replica Info & Propose Change -->
             <div class="col left">
                 <div class="card glass info-card" style="padding: 2.5rem 1.5rem; text-align: center;">
-                    <div class="lock-icon" style="font-size: 3.5rem; margin-bottom: 1rem; color: #ff9800; filter: drop-shadow(0 0 8px rgba(255, 152, 0, 0.4));">🔒</div>
-                    <h3 style="color: #ff9800; margin-bottom: 0.5rem; font-weight: 800; letter-spacing: 1px;">READ-ONLY REPLICA</h3>
-                    <p style="font-size: 0.95rem; line-height: 1.5; color: rgba(255, 255, 255, 0.7); margin-bottom: 1.5rem;">
+                    <div id="replica-icon" style="font-size: 3.5rem; margin-bottom: 1rem; color: #ff9800; filter: drop-shadow(0 0 8px rgba(255, 152, 0, 0.4));">🔒</div>
+                    <h3 id="replica-title" style="color: #ff9800; margin-bottom: 0.5rem; font-weight: 800; letter-spacing: 1px;">READ-ONLY REPLICA</h3>
+                    <p id="replica-desc" style="font-size: 0.95rem; line-height: 1.5; color: rgba(255, 255, 255, 0.7); margin-bottom: 1.5rem;">
                         This node is a designated database replica. Direct write operations (Insert, Update, Delete) are disabled here to guarantee strict consistency across the cluster.
                     </p>
-                    <div style="border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 1.2rem; text-align: left; font-size: 0.85rem; color: rgba(255, 255, 255, 0.5);">
+                    <div id="replica-policies" style="border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 1.2rem; text-align: left; font-size: 0.85rem; color: rgba(255, 255, 255, 0.5);">
                         <strong style="color: #ff9800; display: block; margin-bottom: 0.5rem;">Replication Policies:</strong>
                         <ul style="margin: 0; padding-left: 1.2rem; list-style-type: square; line-height: 1.6;">
                             <li>All write transactions must run on the Master Node.</li>
@@ -63,6 +63,60 @@
                             <li>Supports local high-performance read queries.</li>
                         </ul>
                     </div>
+                </div>
+
+                <!-- Pending Change Requests (Only visible when promoted to Master!) -->
+                <div class="card glass" id="temp-master-requests-card" style="margin-top: 1.5rem; display: none;">
+                    <h3 style="color: #facc15; margin-bottom: 0.5rem; border-bottom: 2px solid #facc15; padding-bottom: 0.5rem;">Pending Proposals Queue</h3>
+                    <p style="font-size: 0.8rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 1rem;">
+                        Review change proposals submitted by other Slaves in the replica network.
+                    </p>
+                    <div id="temp-master-requests-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 250px; overflow-y: auto;">
+                        <p style="font-size: 0.85rem; color: rgba(255, 255, 255, 0.4); text-align: center;">No pending proposals.</p>
+                    </div>
+                </div>
+
+                <!-- Write Request Form -->
+                <div class="card glass form-card" style="margin-top: 1.5rem;">
+                    <h3 id="form-card-title" style="color: var(--primary-med); margin-bottom: 0.5rem; border-bottom: 2px solid var(--primary-acc); padding-bottom: 0.5rem;">Propose Data Change</h3>
+                    <p id="form-card-desc" style="font-size: 0.85rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 1rem;">
+                        Submit a client addition or update proposal to the Master for approval.
+                    </p>
+                    <div class="tabs" style="margin-bottom: 1rem;">
+                        <button class="tab active" id="btn-tab-req-insert" onclick="switchRequestTab('insert')">Propose Insert</button>
+                        <button class="tab" id="btn-tab-req-update" onclick="switchRequestTab('update')">Propose Update</button>
+                        <button class="tab" id="btn-tab-req-delete" onclick="switchRequestTab('delete')">Propose Delete</button>
+                        <button class="tab" id="btn-tab-req-smart" onclick="switchRequestTab('smart')">Propose Smart Query</button>
+                    </div>
+
+                    <div id="tab-req-insert" class="tab-content active">
+                        <input type="text" id="req-ins-name" placeholder="Client Name">
+                        <input type="number" id="req-ins-balance" placeholder="Balance">
+                        <input type="text" id="req-ins-city" placeholder="City">
+                        <button id="btn-submit-insert" onclick="submitChangeRequest('insert')">Submit Insert Proposal</button>
+                    </div>
+
+                    <div id="tab-req-update" class="tab-content" style="display: none;">
+                        <input type="number" id="req-upd-id" placeholder="Client ID">
+                        <input type="text" id="req-upd-name" placeholder="New Name">
+                        <input type="number" id="req-upd-balance" placeholder="New Balance">
+                        <input type="text" id="req-upd-city" placeholder="New City">
+                        <button id="btn-submit-update" onclick="submitChangeRequest('update')">Submit Update Proposal</button>
+                    </div>
+
+                    <div id="tab-req-delete" class="tab-content" style="display: none;">
+                        <input type="number" id="req-del-id" placeholder="Client ID to Delete">
+                        <button id="btn-submit-delete" onclick="submitChangeRequest('delete')">Submit Delete Proposal</button>
+                    </div>
+
+                    <div id="tab-req-smart" class="tab-content" style="display: none;">
+                        <p style="font-size: 0.8rem; color: #ff9800; margin-bottom: 8px;">
+                            💡 Examples: "withdraw 500 from client 7", "deposit 300 to client 2", "delete client 5"
+                        </p>
+                        <input type="text" id="req-smart-input" placeholder="Type smart query (e.g. deposit 300 to client 2)">
+                        <button id="btn-submit-smart" onclick="submitChangeRequest('smart_query')">Submit Smart Query Proposal</button>
+                    </div>
+                    <div id="req-result-msg" style="margin-top: 10px; font-weight: 600; font-size: 0.9rem; color: #ff9800;"></div>
                 </div>
             </div>
 
@@ -88,7 +142,7 @@
                 </div>
 
                 <!-- Replication Logs -->
-                <div class="card glass log-card">
+                <div class="card glass log-card" style="margin-top: 10px;">
                     <h3>Replication & Heartbeat Logs</h3>
                     <div id="logs" class="logs-container">
                         <!-- Dynamic Logs -->

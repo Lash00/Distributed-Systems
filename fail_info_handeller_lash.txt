@@ -1,0 +1,33 @@
+These are **excellent, advanced architectural questions**! Professors absolutely love asking about these scenarios during university discussions. 
+
+Here is exactly how our distributed system handles these situations, designed to be **highly professional yet simple and easy to explain**:
+
+---
+
+### 1️⃣ When the Master fails: Which Slave takes its place?
+In our simple and clean architecture, each Slave Node independently monitors the Master via a background **Heartbeat routine**:
+* Every **5 seconds**, each Slave pings the Master.
+* If a Slave misses **3 heartbeats in a row (15 seconds)**, it assumes the Master has crashed.
+* That Slave instantly **promotes itself to Master** (`config.AppConfig.Role = "master"`).
+* **For your demo**: Since both Slaves run their heartbeat check independently, the one that completes its 3rd failed check first will promote itself and unlock its local write operations. 
+* *Why this is great for discussion:* You can explain to the professor: *"To keep the code clean and easy to explain under university guidelines, we avoid heavy consensus algorithms (like Raft or Paxos). Instead, we use an active heartbeat monitor on each node for immediate self-promotion!"*
+
+---
+
+### 2️⃣ When the Master returns alive: Does it take control again?
+**Yes! Our system has built-in automatic "Failback" (Self-Healing).** 
+
+Here is what happens in the background when you turn the Master node back on:
+1. **The Promoted Slave continues checking**: Even while acting as a temporary Master, the promoted Slave's background routine never stops trying to ping the original Master.
+2. **Master Detected**: The moment the original Master comes back online, the Slave successfully receives a heartbeat response.
+3. **Automatic Demotion**: The Slave instantly says: *"Aha! The leader is back!"* 
+   * It demotes itself back to `"slave"` role.
+   * It locks its database to **Read-Only** replica mode again.
+4. **GUI Update**: The Slave's GUI dynamically switches the indicator status back to **Online** and hides any master controls, returning the system to its original state automatically!
+
+---
+
+### 💡 How to Demo this to the Professor:
+1. **Normal State**: Run Master (`8080`) and Slave (`8081`). Slave GUI shows Master is `Online`.
+2. **Failover Demo**: Stop the Master (`Ctrl + C` in Master terminal). Wait 15 seconds. The Slave GUI shows a warning: **"WARNING: Master node is down! Failover active. This node is promoted to MASTER."**
+3. **Failback Demo**: Run the Master terminal again (`go run backend/main.go`). Within a few seconds, the Slave GUI logs: **"SUCCESS: Master node is back online."** and the Slave automatically demotes itself back to a regular Slave!

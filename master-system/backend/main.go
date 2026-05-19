@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"master-system/config"
 	"master-system/database"
@@ -46,6 +48,12 @@ func main() {
 	
 	// 7. GUI Info Endpoints
 	r.GET("/status", getStatus)
+
+	// 8. Client Change Request Queue Endpoints
+	r.POST("/submit-request", submitChangeRequest)
+	r.GET("/pending-requests", getPendingRequests)
+	r.POST("/approve-request", approveChangeRequest)
+	r.POST("/reject-request", rejectChangeRequest)
 
 	addr := fmt.Sprintf("%s:%s", config.AppConfig.IP, config.AppConfig.Port)
 	log.Printf("Master Node starting on %s...", addr)
@@ -102,9 +110,19 @@ func updateClient(c *gin.Context) {
 	log.Printf("[INFO] Received UPDATE request: ID=%d, Name='%s', Balance=%0.2f, City='%s'", req.ID, req.Name, req.Balance, req.City)
 
 	// Update local DB
-	_, err := database.DB.Exec("UPDATE clients SET name=?, balance=?, city=? WHERE id=?", req.Name, req.Balance, req.City, req.ID)
+	res, err := database.DB.Exec("UPDATE clients SET name=?, balance=?, city=? WHERE id=?", req.Name, req.Balance, req.City, req.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if rowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Client with ID %d does not exist", req.ID)})
 		return
 	}
 
@@ -124,9 +142,19 @@ func deleteClient(c *gin.Context) {
 	}
 
 	// Delete from local DB
-	_, err := database.DB.Exec("DELETE FROM clients WHERE id=?", req.ID)
+	res, err := database.DB.Exec("DELETE FROM clients WHERE id=?", req.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if rowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Client with ID %d does not exist", req.ID)})
 		return
 	}
 
@@ -184,14 +212,21 @@ func handleTextToQuery(c *gin.Context) {
 	text := strings.ToLower(strings.TrimSpace(req.Text))
 	parts := strings.Split(text, " ")
 
-	if strings.HasPrefix(text, "delete client") && len(parts) >= 3 {
-		// e.g. "delete client 5"
-		idStr := parts[2]
-		id, _ := strconv.Atoi(idStr)
+	if strings.HasPrefix(text, "delete client") {
+		id, err := parseDeleteQuery(text)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse delete query: " + err.Error()})
+			return
+		}
 		
-		_, err := database.DB.Exec("DELETE FROM clients WHERE id=?", id)
+		res, err := database.DB.Exec("DELETE FROM clients WHERE id=?", id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		rowsAffected, _ := res.RowsAffected()
+		if rowsAffected == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Client with ID %d not found", id)})
 			return
 		}
 		replication.ReplicateToSlaves("delete", "clients", map[string]interface{}{"id": id})
@@ -199,19 +234,10 @@ func handleTextToQuery(c *gin.Context) {
 		return
 	}
 
-	if strings.HasPrefix(text, "withdraw") && len(parts) >= 5 {
-		// e.g. "withdraw 500 from client 7"
-		amountStr := parts[1]
-		amount, err := strconv.ParseFloat(amountStr, 64)
+	if strings.HasPrefix(text, "withdraw") {
+		amount, id, err := parseWithdrawQuery(text)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid amount"})
-			return
-		}
-
-		idStr := parts[4]
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid client ID"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse withdraw query: " + err.Error()})
 			return
 		}
 
@@ -219,12 +245,12 @@ func handleTextToQuery(c *gin.Context) {
 		var client database.Client
 		err = database.DB.QueryRow("SELECT id, name, balance, city FROM clients WHERE id=?", id).Scan(&client.ID, &client.Name, &client.Balance, &client.City)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Client %d not found", id)})
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Client with ID %d not found", id)})
 			return
 		}
 
 		if client.Balance < amount {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Insufficient balance"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Insufficient balance. Client %d has $%0.2f, cannot withdraw $%0.2f.", id, client.Balance, amount)})
 			return
 		}
 
@@ -239,6 +265,34 @@ func handleTextToQuery(c *gin.Context) {
 		replication.ReplicateToSlaves("update", "clients", client)
 
 		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Withdrew $%0.2f from Client %d (%s). New balance: $%0.2f.", amount, id, client.Name, newBalance)})
+		return
+	}
+
+	if strings.HasPrefix(text, "deposit") {
+		amount, id, err := parseDepositQuery(text)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse deposit query: " + err.Error()})
+			return
+		}
+
+		var client database.Client
+		err = database.DB.QueryRow("SELECT id, name, balance, city FROM clients WHERE id=?", id).Scan(&client.ID, &client.Name, &client.Balance, &client.City)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Client with ID %d not found", id)})
+			return
+		}
+
+		newBalance := client.Balance + amount
+		_, err = database.DB.Exec("UPDATE clients SET balance=? WHERE id=?", newBalance, id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		client.Balance = newBalance
+		replication.ReplicateToSlaves("update", "clients", client)
+
+		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Deposited $%0.2f to Client %d (%s). New balance: $%0.2f.", amount, id, client.Name, newBalance)})
 		return
 	}
 
@@ -282,3 +336,381 @@ func getStatus(c *gin.Context) {
 		"active_slaves": activeSlaves,
 	})
 }
+
+// ChangeRequest represents an incoming write request from a slave or client
+type ChangeRequest struct {
+	ID        string                 `json:"id"`
+	Type      string                 `json:"type"` // "insert" or "update"
+	Data      map[string]interface{} `json:"data"`
+	Status    string                 `json:"status"` // "pending", "approved", "rejected"
+	OriginIP  string                 `json:"origin_ip"`
+	Timestamp string                 `json:"timestamp"`
+}
+
+var PendingRequests = []ChangeRequest{}
+var reqMu sync.Mutex
+
+func submitChangeRequest(c *gin.Context) {
+	var req struct {
+		Type string                 `json:"type"`
+		Data map[string]interface{} `json:"data"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("[ERROR] Failed to bind JSON for submit request: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	// Validate client ID existence for update/delete/withdraw/deposit
+	if req.Type == "update" {
+		idVal, ok := req.Data["id"]
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Client ID is required for update"})
+			return
+		}
+		var targetID int
+		switch v := idVal.(type) {
+		case float64:
+			targetID = int(v)
+		case int:
+			targetID = v
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Client ID format"})
+			return
+		}
+
+		var exists bool
+		err := database.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM clients WHERE id=?)", targetID).Scan(&exists)
+		if err != nil || !exists {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Client with ID %d does not exist in Master DB", targetID)})
+			return
+		}
+	} else if req.Type == "smart_query" {
+		queryText, ok := req.Data["query"].(string)
+		if ok {
+			text := strings.ToLower(strings.TrimSpace(queryText))
+			var targetID int
+			var err error
+			var isWithdraw, isDeposit, isDelete bool
+
+			if strings.HasPrefix(text, "withdraw") {
+				_, targetID, err = parseWithdrawQuery(text)
+				isWithdraw = true
+			} else if strings.HasPrefix(text, "deposit") {
+				_, targetID, err = parseDepositQuery(text)
+				isDeposit = true
+			} else if strings.HasPrefix(text, "delete client") {
+				targetID, err = parseDeleteQuery(text)
+				isDelete = true
+			}
+
+			if (isWithdraw || isDeposit || isDelete) {
+				if err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query syntax: " + err.Error()})
+					return
+				}
+				var exists bool
+				dbErr := database.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM clients WHERE id=?)", targetID).Scan(&exists)
+				if dbErr != nil || !exists {
+					c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Client with ID %d does not exist in Master DB", targetID)})
+					return
+				}
+			}
+		}
+	}
+
+	reqMu.Lock()
+	defer reqMu.Unlock()
+
+	id := fmt.Sprintf("REQ-%d", time.Now().UnixNano())
+	newReq := ChangeRequest{
+		ID:        id,
+		Type:      req.Type,
+		Data:      req.Data,
+		Status:    "pending",
+		OriginIP:  c.ClientIP(),
+		Timestamp: time.Now().Format("15:04:05"),
+	}
+
+	PendingRequests = append(PendingRequests, newReq)
+	log.Printf("[INFO] New change request received: %s from %s (Type: %s)", id, newReq.OriginIP, newReq.Type)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Request submitted to Master successfully", "id": id})
+}
+
+func getPendingRequests(c *gin.Context) {
+	reqMu.Lock()
+	defer reqMu.Unlock()
+	c.JSON(http.StatusOK, PendingRequests)
+}
+
+func approveChangeRequest(c *gin.Context) {
+	var body struct {
+		ID string `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	reqMu.Lock()
+	defer reqMu.Unlock()
+
+	var targetReq *ChangeRequest
+	var targetIndex = -1
+	for i, r := range PendingRequests {
+		if r.ID == body.ID {
+			targetReq = &PendingRequests[i]
+			targetIndex = i
+			break
+		}
+	}
+
+	if targetReq == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Request not found"})
+		return
+	}
+
+	// Process the change on Master DB
+	if targetReq.Type == "insert" {
+		name := targetReq.Data["name"].(string)
+		balance := targetReq.Data["balance"].(float64)
+		city := targetReq.Data["city"].(string)
+
+		res, err := database.DB.Exec("INSERT INTO clients (name, balance, city) VALUES (?, ?, ?)", name, balance, city)
+		if err != nil {
+			log.Printf("[ERROR] Failed to execute insert from request: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write to Master DB: " + err.Error()})
+			return
+		}
+
+		id, _ := res.LastInsertId()
+		// Replicate to all slaves
+		clientData := database.Client{
+			ID:      int(id),
+			Name:    name,
+			Balance: balance,
+			City:    city,
+		}
+		replication.ReplicateToSlaves("insert", "clients", clientData)
+
+	} else if targetReq.Type == "update" {
+		id := int(targetReq.Data["id"].(float64))
+		name := targetReq.Data["name"].(string)
+		balance := targetReq.Data["balance"].(float64)
+		city := targetReq.Data["city"].(string)
+
+		res, err := database.DB.Exec("UPDATE clients SET name=?, balance=?, city=? WHERE id=?", name, balance, city, id)
+		if err != nil {
+			log.Printf("[ERROR] Failed to execute update from request: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write to Master DB: " + err.Error()})
+			return
+		}
+		rowsAffected, _ := res.RowsAffected()
+		if rowsAffected == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Client with ID %d not found in Master DB", id)})
+			return
+		}
+
+		// Replicate to all slaves
+		clientData := database.Client{
+			ID:      id,
+			Name:    name,
+			Balance: balance,
+			City:    city,
+		}
+		replication.ReplicateToSlaves("update", "clients", clientData)
+	} else if targetReq.Type == "smart_query" {
+		queryText := targetReq.Data["query"].(string)
+		text := strings.ToLower(strings.TrimSpace(queryText))
+
+		if strings.HasPrefix(text, "withdraw") {
+			amount, id, err := parseWithdrawQuery(text)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse withdraw query: " + err.Error()})
+				return
+			}
+
+			var client database.Client
+			err = database.DB.QueryRow("SELECT id, name, balance, city FROM clients WHERE id=?", id).Scan(&client.ID, &client.Name, &client.Balance, &client.City)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Client with ID %d not found", id)})
+				return
+			}
+
+			if client.Balance < amount {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Insufficient balance. Client %d has $%0.2f, cannot withdraw $%0.2f.", id, client.Balance, amount)})
+				return
+			}
+
+			newBalance := client.Balance - amount
+			_, err = database.DB.Exec("UPDATE clients SET balance=? WHERE id=?", newBalance, id)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to execute withdrawal on Master DB: " + err.Error()})
+				return
+			}
+
+			client.Balance = newBalance
+			replication.ReplicateToSlaves("update", "clients", client)
+		} else if strings.HasPrefix(text, "deposit") {
+			amount, id, err := parseDepositQuery(text)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse deposit query: " + err.Error()})
+				return
+			}
+
+			var client database.Client
+			err = database.DB.QueryRow("SELECT id, name, balance, city FROM clients WHERE id=?", id).Scan(&client.ID, &client.Name, &client.Balance, &client.City)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Client with ID %d not found", id)})
+				return
+			}
+
+			newBalance := client.Balance + amount
+			_, err = database.DB.Exec("UPDATE clients SET balance=? WHERE id=?", newBalance, id)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to execute deposit on Master DB: " + err.Error()})
+				return
+			}
+
+			client.Balance = newBalance
+			replication.ReplicateToSlaves("update", "clients", client)
+		} else if strings.HasPrefix(text, "delete client") {
+			id, err := parseDeleteQuery(text)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse delete query: " + err.Error()})
+				return
+			}
+
+			res, err := database.DB.Exec("DELETE FROM clients WHERE id=?", id)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to execute delete on Master DB: " + err.Error()})
+				return
+			}
+			rowsAffected, _ := res.RowsAffected()
+			if rowsAffected == 0 {
+				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Client with ID %d not found", id)})
+				return
+			}
+			replication.ReplicateToSlaves("delete", "clients", map[string]interface{}{"id": id})
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported smart query format for change request."})
+			return
+		}
+	}
+
+	// Remove from pending list
+	PendingRequests = append(PendingRequests[:targetIndex], PendingRequests[targetIndex+1:]...)
+	log.Printf("[INFO] Change request approved: %s", body.ID)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Request approved and executed successfully"})
+}
+
+func rejectChangeRequest(c *gin.Context) {
+	var body struct {
+		ID string `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	reqMu.Lock()
+	defer reqMu.Unlock()
+
+	var targetIndex = -1
+	for i, r := range PendingRequests {
+		if r.ID == body.ID {
+			targetIndex = i
+			break
+		}
+	}
+
+	if targetIndex == -1 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Request not found"})
+		return
+	}
+
+	// Remove from pending list
+	PendingRequests = append(PendingRequests[:targetIndex], PendingRequests[targetIndex+1:]...)
+	log.Printf("[INFO] Change request rejected: %s", body.ID)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Request rejected successfully"})
+}
+
+func parseWithdrawQuery(text string) (float64, int, error) {
+	text = strings.ToLower(strings.TrimSpace(text))
+	parts := strings.Split(text, " ")
+	if len(parts) < 3 {
+		return 0, 0, fmt.Errorf("query too short (e.g. withdraw 500 from client 7)")
+	}
+
+	amount, err := strconv.ParseFloat(parts[1], 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid withdrawal amount: %s", parts[1])
+	}
+
+	var id int
+	var foundID bool
+	for i := len(parts) - 1; i >= 0; i-- {
+		val, err := strconv.Atoi(parts[i])
+		if err == nil {
+			id = val
+			foundID = true
+			break
+		}
+	}
+
+	if !foundID {
+		return 0, 0, fmt.Errorf("could not locate client ID in query")
+	}
+
+	return amount, id, nil
+}
+
+func parseDeleteQuery(text string) (int, error) {
+	text = strings.ToLower(strings.TrimSpace(text))
+	parts := strings.Split(text, " ")
+	if len(parts) < 2 {
+		return 0, fmt.Errorf("query too short (e.g. delete client 5)")
+	}
+
+	for i := len(parts) - 1; i >= 0; i-- {
+		val, err := strconv.Atoi(parts[i])
+		if err == nil {
+			return val, nil
+		}
+	}
+	return 0, fmt.Errorf("could not locate client ID in query")
+}
+
+func parseDepositQuery(text string) (float64, int, error) {
+	text = strings.ToLower(strings.TrimSpace(text))
+	parts := strings.Split(text, " ")
+	if len(parts) < 3 {
+		return 0, 0, fmt.Errorf("query too short (e.g. deposit 500 to client 7)")
+	}
+
+	amount, err := strconv.ParseFloat(parts[1], 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid deposit amount: %s", parts[1])
+	}
+
+	var id int
+	var foundID bool
+	for i := len(parts) - 1; i >= 0; i-- {
+		val, err := strconv.Atoi(parts[i])
+		if err == nil {
+			id = val
+			foundID = true
+			break
+		}
+	}
+
+	if !foundID {
+		return 0, 0, fmt.Errorf("could not locate client ID in query")
+	}
+
+	return amount, id, nil
+}
+
